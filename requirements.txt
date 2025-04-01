@@ -1,4 +1,4 @@
-ultralytics
+tensorflow
 opencv-python
 numpy
 picamera2
