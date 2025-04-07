@@ -26,4 +26,4 @@ build/
 *.swp
 
 # Virtual Environment
-edge-venv
+edge-env
