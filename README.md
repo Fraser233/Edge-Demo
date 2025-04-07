@@ -30,7 +30,7 @@ Refer to the video: [Camera Installation Guide](https://youtu.be/GImeVqHQzsE)
 4. Open the terminal and use the following command to open the `YOLO_Demo` folder:
 
    ```bash
-   cd YOLO_Demo
+   cd Demo
 
 ## 5. Install System Dependencies
 Run the following command to install required libraries:
