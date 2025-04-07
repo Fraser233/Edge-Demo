@@ -24,7 +24,7 @@ Refer to the video: [Camera Installation Guide](https://youtu.be/GImeVqHQzsE)
 
 
 ## 4. Transfer YOLO Demo
-1. Download the `YOLO_Demo` folder to a USB drive.
+1. Download the `Demo.zip` file from this Github repo to your USB drive and unzip it.
 2. Plug the USB drive into your Respberry PI.  
 3. Copy the demo folder into your home directory (root of your user)
 4. Open the terminal and use the following command to open the `YOLO_Demo` folder:
