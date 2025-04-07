@@ -1,4 +1,5 @@
-tensorflow-keras
+tensorflow
+tensorflow_hub
 opencv-python
 numpy
 picamera2

@@ -1,5 +1,8 @@
 # Raspberry Pi Setup and YOLO Demo Installation
 
+![Final Setup](final_setup.jpg)
+*Figure: Final hardware+sofeware setup for the Raspberry Pi 4 with Picamera.*
+
 ## 1. Flash Raspberry Pi OS to SD Card
 1. On your computer, download the Raspberry Pi OS imager from the [official site](https://www.raspberrypi.com/software/).  
 2. Insert the microSD card (come with the device in the box) into the computer’s card reader.  
@@ -63,5 +66,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
+
+> ⏳ The starting process may take 30 secs. Be patient.
 
 ```

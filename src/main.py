@@ -1,12 +1,28 @@
 import cv2
 import argparse
 import numpy as np
-from picamera2 import Picamera2
 import tensorflow as tf
+import tensorflow_hub as hub
+from picamera2 import Picamera2
 
 # Constants for camera resolution
 IM_WIDTH = 1280
 IM_HEIGHT = 720
+
+# Optional: Partial COCO labels mapping for better display (expand as needed)
+COCO_LABELS = {
+    1: 'person',
+    2: 'bicycle',
+    3: 'car',
+    4: 'motorcycle',
+    5: 'airplane',
+    6: 'bus',
+    7: 'train',
+    8: 'truck',
+    9: 'boat',
+    10: 'traffic light',
+    # Add additional mappings as needed
+}
 
 def check_available_cameras():
     available_cameras = []
@@ -17,51 +33,76 @@ def check_available_cameras():
         cap.release()
     return available_cameras
 
-def load_tflite_model(model_path):
-    interpreter = tf.lite.Interpreter(model_path=model_path)
-    interpreter.allocate_tensors()
-    print(f"TFLite model loaded from: {model_path}")
-    return interpreter
+def load_online_model(model_url):
+    """
+    Load a TF2-compatible object detection model from TensorFlow Hub.
+    For example, SSD MobileNet V2 trained on COCO.
+    """
+    detector = hub.load(model_url)
+    print(f"Online model loaded from: {model_url}")
+    return detector
 
-def process_frame(interpreter, frame):
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+def process_frame(detector, frame, use_usb=True):
+    """
+    Process a single frame using the online detector.
+    Assumes the model expects a uint8 image of shape [1, H, W, 3] and returns:
+      - detection_boxes: [1, num_detections, 4] in normalized [ymin, xmin, ymax, xmax]
+      - detection_scores: [1, num_detections]
+      - detection_classes: [1, num_detections]
+      - num_detections: [1]
+    """
+    # Prepare input image
+    if use_usb:
+        # USB frames are in BGR; convert to RGB.
+        input_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    else:
+        # Assume Picamera2 frames are in RGB.
+        input_img = frame.copy()
+    
+    # If the image has an extra alpha channel, drop it.
+    if input_img.shape[-1] == 4:
+        input_img = input_img[..., :3]
 
-    # Preprocess frame
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(frame_rgb, (input_details[0]['shape'][2], input_details[0]['shape'][1]))
-    input_tensor = resized.astype(np.float32) / 255.0
-    input_tensor = np.expand_dims(input_tensor, axis=0)
-
+    # Many TF2 detection models expect a batch dimension and uint8 input
+    input_tensor = tf.convert_to_tensor(np.expand_dims(input_img, axis=0), dtype=tf.uint8)
+    
     # Run inference
-    interpreter.set_tensor(input_details[0]['index'], input_tensor)
-    interpreter.invoke()
-    predictions = interpreter.get_tensor(output_details[0]['index'])
-
-    if predictions.ndim == 3:
-        predictions = predictions[0]
-
+    results = detector(input_tensor)
+    
+    detection_boxes = results['detection_boxes'].numpy()[0]
+    detection_scores = results['detection_scores'].numpy()[0]
+    detection_classes = results['detection_classes'].numpy()[0].astype(np.int32)
+    num_detections = int(results['num_detections'].numpy()[0])
+    
     score_threshold = 0.5
     height, width, _ = frame.shape
 
-    for detection in predictions:
-        x_min, y_min, x_max, y_max, score, class_id = detection
-        if score < score_threshold:
+    # For display, ensure we show a BGR image
+    if use_usb:
+        display_frame = frame.copy()  # already in BGR
+    else:
+        display_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+    # Process and draw detections
+    for i in range(num_detections):
+        if detection_scores[i] < score_threshold:
             continue
-
-        left = int(x_min * width)
-        top = int(y_min * height)
-        right = int(x_max * width)
-        bottom = int(y_max * height)
-
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        label = f"ID:{int(class_id)} {score:.2f}"
-        cv2.putText(frame, label, (left, top - 10),
+        ymin, xmin, ymax, xmax = detection_boxes[i]
+        left = int(xmin * width)
+        top = int(ymin * height)
+        right = int(xmax * width)
+        bottom = int(ymax * height)
+        
+        cv2.rectangle(display_frame, (left, top), (right, bottom), (0, 255, 0), 2)
+        class_id = detection_classes[i]
+        class_name = COCO_LABELS.get(class_id, "N/A")
+        label = f"{class_name} ({detection_scores[i]:.2f})"
+        cv2.putText(display_frame, label, (left, top - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    
+    cv2.imshow("Online Model Object Detection", display_frame)
 
-    cv2.imshow("TFLite YOLO Object Detection", frame)
-
-def run_inference(interpreter, camera_idx, use_usb):
+def run_inference(detector, camera_idx, use_usb):
     if use_usb:
         cap = cv2.VideoCapture(camera_idx)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, IM_WIDTH)
@@ -77,8 +118,9 @@ def run_inference(interpreter, camera_idx, use_usb):
     try:
         while True:
             frame = cap.read()[1] if use_usb else picam2.capture_array()
-            process_frame(interpreter, frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            process_frame(detector, frame, use_usb)
+            key = cv2.waitKey(10)  # increased delay for better key capture
+            if key & 0xFF == ord('q'):
                 print("Exiting...")
                 break
     finally:
@@ -88,11 +130,12 @@ def run_inference(interpreter, camera_idx, use_usb):
             picam2.stop()
         cv2.destroyAllWindows()
 
+
 def main():
-    parser = argparse.ArgumentParser(description="TFLite YOLO Object Detection Script")
-    parser.add_argument("--model-path", type=str,
-                        default="models/yolo11n_tf/yolo11n_float32.tflite",
-                        help="Path to .tflite model file")
+    parser = argparse.ArgumentParser(description="Online Model Object Detection Script using TensorFlow Hub")
+    parser.add_argument("--model-url", type=str,
+                        default="https://tfhub.dev/tensorflow/ssd_mobilenet_v2/2",
+                        help="TF Hub model URL")
     parser.add_argument("--camera-idx", type=int, default=None,
                         help="Camera index to use")
     parser.add_argument("--usbcam", action="store_true",
@@ -109,8 +152,8 @@ def main():
         print(f"Camera index {camera_idx} is not available. Available: {available_cameras}")
         exit()
 
-    interpreter = load_tflite_model(args.model_path)
-    run_inference(interpreter, camera_idx, args.usbcam)
+    detector = load_online_model(args.model_url)
+    run_inference(detector, camera_idx, args.usbcam)
 
 if __name__ == "__main__":
     main()
